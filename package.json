@@ -1,14 +1,17 @@
 {
   "name": "backend",
   "version": "1.0.0",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   },
   "keywords": [],
   "author": "",
-  "type": "module",
   "license": "ISC",
   "description": "",
   "dependencies": {
