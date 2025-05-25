@@ -9,19 +9,27 @@ import authRoutes from './routes/auth.route.js';
 import messageRoutes from './routes/message.route.js';
 import { connectDB } from './lib/db.js';
 import { createAdminIfNotExists } from './lib/createAdmin.js';
+
 const app = express();
 app.use(cookieParser()) 
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Update CORS for production
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
+  : ['http://localhost:5173'];
+
 app.use(cors({
-  origin:'http://localhost:5173',
-  credentials:true,
+  origin: allowedOrigins,
+  credentials: true,
 }))
 
-const PORT=process.env.PORT || 5001
-app.use('/api/auth',authRoutes)
-app.use('/api/message',messageRoutes)
+const PORT = process.env.PORT || 5001;
+
+app.use('/api/auth', authRoutes)
+app.use('/api/message', messageRoutes)
 
 // Create HTTP server
 const server = createServer(app);
@@ -29,7 +37,7 @@ const server = createServer(app);
 // Create Socket.io server
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:5173',
+    origin: allowedOrigins,
     credentials: true,
   }
 });
@@ -98,8 +106,18 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log('Server started on port:' + PORT);
-  connectDB()
-  createAdminIfNotExists()
-});
+// For Vercel export
+export default app;
+
+// Only start server locally
+if (process.env.NODE_ENV !== 'production') {
+  server.listen(PORT, () => {
+    console.log('Server started on port:' + PORT);
+    connectDB()
+    createAdminIfNotExists()
+  });
+} else {
+  // Connect to DB for Vercel
+  connectDB();
+  createAdminIfNotExists();
+}
