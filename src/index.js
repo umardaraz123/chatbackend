@@ -26,7 +26,12 @@ app.use(cors({
   credentials: true,
 }))
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 3000;
+
+// Add a test route
+app.get('/', (req, res) => {
+  res.json({ message: 'Backend is working!' });
+});
 
 app.use('/api/auth', authRoutes)
 app.use('/api/message', messageRoutes)
@@ -109,15 +114,18 @@ io.on('connection', (socket) => {
 // For Vercel export
 export default app;
 
-// Only start server locally
-if (process.env.NODE_ENV !== 'production') {
-  server.listen(PORT, () => {
-    console.log('Server started on port:' + PORT);
-    connectDB()
-    createAdminIfNotExists()
-  });
-} else {
-  // Connect to DB for Vercel
-  connectDB();
-  createAdminIfNotExists();
-}
+// Start server
+const startServer = async () => {
+  try {
+    await connectDB();
+    await createAdminIfNotExists();
+    
+    server.listen(PORT, () => {
+      console.log('Server started on port:' + PORT);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+  }
+};
+
+startServer();
