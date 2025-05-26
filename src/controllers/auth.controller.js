@@ -135,17 +135,32 @@ export const signup = async (req, res) => {
   }
 };
 export const login = async (req, res) => {
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', 'https://boneandbone.netlify.app');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   const { email, password } = req.body;
+
   try {
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+
     const isPasswordMatch = await bcrypt.compare(password, user.password);
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+
     const token = generateToken(user._id, res);
+
     return res.status(200).json({
       token,
       _id: user._id,
@@ -158,6 +173,7 @@ export const login = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 export const logout = (req, res) => {
   try {
     res.cookie("jwt", "", {
