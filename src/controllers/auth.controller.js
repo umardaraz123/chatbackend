@@ -7,15 +7,40 @@ import { connectDB } from "../lib/db.js";
 // Helper function to ensure DB connection
 const ensureDbConnected = async () => {
   try {
-    const mongoose = (await import('mongoose')).default;
-    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
-      console.log('MongoDB not connected, connecting now...');
-      await connectDB();
+    // Import mongoose safely (avoiding any undefined issues)
+    let mongoose;
+    try {
+      mongoose = (await import('mongoose')).default;
+    } catch (importError) {
+      console.log('Error importing mongoose, trying direct import');
+      const mongooseModule = await import('mongoose');
+      mongoose = mongooseModule;
     }
+    
+    // Check connection status safely
+    let needsConnection = true;
+    
+    if (mongoose && mongoose.connection) {
+      try {
+        const state = mongoose.connection.readyState;
+        needsConnection = state !== 1; // 1 means connected
+        console.log(`MongoDB connection state: ${state} (${needsConnection ? 'needs connection' : 'already connected'})`);
+      } catch (stateError) {
+        console.log('Error checking mongoose state:', stateError.message);
+      }
+    }
+    
+    if (needsConnection) {
+      console.log('MongoDB not connected or state check failed, connecting now...');
+      await connectDB();
+      console.log('MongoDB connection attempt completed');
+    }
+    
     return true;
   } catch (error) {
     console.error("Failed to connect to database:", error);
-    throw error;
+    // Don't throw, just return false to allow degraded operation
+    return false;
   }
 };
 
@@ -187,15 +212,16 @@ export const login = async (req, res) => {
     const isPasswordMatch = await bcrypt.compare(password, user.password);
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    // Generate token and make sure it's returned properly
+    }    // Generate token and make sure it's returned properly
     const token = generateToken(user._id, res);
     
     if (!token) {
       return res.status(500).json({ message: "Failed to generate authentication token" });
     }
 
+    console.log(`Login successful for user: ${user.email}, token generated successfully`);
+
+    // Return the token in the response for the client to use in Authorization header
     return res.status(200).json({
       token,
       _id: user._id,
@@ -369,14 +395,26 @@ export const updateProfile = async (req, res) => {
 //check auth
 export const checkAuth = (req, res) => {
   try {
+    // Log the authorization data for debugging
+    console.log("Auth check - Headers:", {
+      auth: req.headers.authorization,
+      cookies: req.cookies
+    });
+    
     if (req.user) {
-      return res.status(200).json(req.user);
+      console.log("User authenticated:", req.user.email);
+      return res.status(200).json({
+        isAuthenticated: true,
+        user: req.user,
+        authMethod: req.headers.authorization ? "bearer" : "cookie"
+      });
     } else {
-      return res.status(401).json({ message: "Unauthorized" });
+      console.log("Auth check failed - No user in request");
+      return res.status(401).json({ message: "Unauthorized", isAuthenticated: false });
     }
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({ message: "Internal server error" });
+    console.log("Auth check error:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 //get users
