@@ -141,7 +141,7 @@ export const login = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-  // Handle preflight OPTIONS request
+ 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
