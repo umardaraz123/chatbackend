@@ -21,9 +21,29 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
   : ['http://localhost:5173'];
 
+console.log('CORS settings:', {
+  environment: process.env.NODE_ENV,
+  allowedOrigins
+});
+
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      console.log(`Origin ${origin} not allowed by CORS`);
+      // Consider allowing all origins in development
+      if (process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      return callback(null, allowedOrigins[0]); // Default to first allowed origin
+    }
+    return callback(null, true);
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }))
 
 const PORT = process.env.PORT || 3000;

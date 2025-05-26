@@ -149,6 +149,11 @@ export const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -159,18 +164,24 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    // Generate token and make sure it's returned properly
     const token = generateToken(user._id, res);
+    
+    if (!token) {
+      return res.status(500).json({ message: "Failed to generate authentication token" });
+    }
 
     return res.status(200).json({
       token,
       _id: user._id,
-      fullName: user.fullName,
+      fullName: `${user.firstName} ${user.lastName}`,
       email: user.email,
       profilePic: user.profilePic,
+      role: user.role || "customer"
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({ message: "Internal server error" });
+    console.error("Login error:", error);
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 
