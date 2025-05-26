@@ -2,6 +2,22 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
+import { connectDB } from "../lib/db.js";
+
+// Helper function to ensure DB connection
+const ensureDbConnected = async () => {
+  try {
+    const mongoose = (await import('mongoose')).default;
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+      console.log('MongoDB not connected, connecting now...');
+      await connectDB();
+    }
+    return true;
+  } catch (error) {
+    console.error("Failed to connect to database:", error);
+    throw error;
+  }
+};
 
 export const signup = async (req, res) => {
   const {
@@ -146,15 +162,9 @@ export const login = async (req, res) => {
   //   return res.status(200).end();
   // }
 
-  const { email, password } = req.body;
-
-  try {
-    // Ensure MongoDB is connected (for serverless environments)
-    const mongoose = await import('mongoose');
-    if (mongoose.connection.readyState !== 1) {
-      const { connectDB } = await import('../lib/db.js');
-      await connectDB();
-    }
+  const { email, password } = req.body;  try {
+    // Ensure MongoDB is connected
+    await ensureDbConnected();
     
     // Validate input
     if (!email || !password) {

@@ -134,31 +134,39 @@ io.on('connection', (socket) => {
 // For Vercel export
 export default app;
 
-// Connect to database immediately for serverless environments
+// Connect to database immediately 
+console.log('🌐 Initializing database connection...');
 connectDB()
-  .then(() => createAdminIfNotExists())
+  .then((connection) => {
+    console.log('✅ Database connection established');
+    return createAdminIfNotExists();
+  })
   .then(() => {
-    console.log('Database connected and admin user verified');
+    console.log('👤 Admin user verified');
   })
   .catch(err => {
-    console.error('Database initialization failed:', err);
+    console.error('❌ Database initialization failed:', err);
+    // Don't exit the process on error - let individual routes handle DB reconnection
   });
 
 // Start server
 const startServer = async () => {
   try {
-    // Note: For Vercel serverless functions, we don't need to wait for DB connection here
-    // as it's already initiated above, and we'll also check in API handlers
+    // In local development, wait a bit for the database connection to establish
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('⏳ Waiting for database connection...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
     
     server.listen(PORT, () => {
-      console.log('Server started on port:' + PORT);
+      console.log('🚀 Server started on port:' + PORT);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('❌ Failed to start server:', error);
   }
 };
 
-// Only start listening server in non-serverless environment
-if (process.env.NODE_ENV !== 'production') {
-  startServer();
-}
+// Start server in all environments
+// For Vercel, this won't actually start a listening server
+// but the Express handlers will still work
+startServer();
