@@ -149,12 +149,27 @@ export const login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
+    // Ensure MongoDB is connected (for serverless environments)
+    const mongoose = await import('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      const { connectDB } = await import('../lib/db.js');
+      await connectDB();
+    }
+    
     // Validate input
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ email });
+    // Use a timeout promise to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database query timed out')), 8000)
+    );
+    
+    // Find user with timeout protection
+    const userPromise = User.findOne({ email });
+    const user = await Promise.race([userPromise, timeoutPromise]);
+    
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
@@ -181,7 +196,20 @@ export const login = async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return res.status(500).json({ message: "Internal server error", error: error.message });
+    
+    // Return more helpful error messages based on error type
+    if (error.name === 'MongooseError' || error.name === 'MongoError' || 
+        error.message.includes('timed out')) {
+      return res.status(503).json({ 
+        message: "Database connection issue, please try again", 
+        error: error.message
+      });
+    }
+    
+    return res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
   }
 };
 

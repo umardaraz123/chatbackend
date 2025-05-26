@@ -134,11 +134,21 @@ io.on('connection', (socket) => {
 // For Vercel export
 export default app;
 
+// Connect to database immediately for serverless environments
+connectDB()
+  .then(() => createAdminIfNotExists())
+  .then(() => {
+    console.log('Database connected and admin user verified');
+  })
+  .catch(err => {
+    console.error('Database initialization failed:', err);
+  });
+
 // Start server
 const startServer = async () => {
   try {
-    await connectDB();
-    await createAdminIfNotExists();
+    // Note: For Vercel serverless functions, we don't need to wait for DB connection here
+    // as it's already initiated above, and we'll also check in API handlers
     
     server.listen(PORT, () => {
       console.log('Server started on port:' + PORT);
@@ -148,4 +158,7 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Only start listening server in non-serverless environment
+if (process.env.NODE_ENV !== 'production') {
+  startServer();
+}
