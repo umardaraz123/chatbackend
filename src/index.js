@@ -11,7 +11,7 @@ import { connectDB } from './lib/db.js';
 import { createAdminIfNotExists } from './lib/createAdmin.js';
 
 const app = express();
-app.use(cookieParser()) 
+app.use(cookieParser());
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -19,7 +19,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Update CORS for production
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
-  : ['http://localhost:5173'];
+  : ['http://localhost:5173', 'http://localhost:3000'];
 
 console.log('CORS settings:', {
   environment: process.env.NODE_ENV,
@@ -44,17 +44,30 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}))
+}));
 
 const PORT = process.env.PORT || 3000;
 
 // Add a test route
 app.get('/', (req, res) => {
-  res.json({ message: 'Backend is working!' });
+  res.json({ 
+    message: 'Backend is working now!',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
 });
 
-app.use('/api/auth', authRoutes)
-app.use('/api/message', messageRoutes)
+// Health check route
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/message', messageRoutes);
 
 // Create HTTP server
 const server = createServer(app);
@@ -131,42 +144,47 @@ io.on('connection', (socket) => {
   });
 });
 
-// For Vercel export
-export default app;
+// Initialize database connection
+let dbInitialized = false;
 
-// Connect to database immediately 
-console.log('🌐 Initializing database connection...');
-connectDB()
-  .then((connection) => {
-    console.log('✅ Database connection established');
-    return createAdminIfNotExists();
-  })
-  .then(() => {
-    console.log('👤 Admin user verified');
-  })
-  .catch(err => {
-    console.error('❌ Database initialization failed:', err);
-    // Don't exit the process on error - let individual routes handle DB reconnection
-  });
-
-// Start server
-const startServer = async () => {
-  try {
-    // In local development, wait a bit for the database connection to establish
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('⏳ Waiting for database connection...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+const initializeApp = async () => {
+  if (!dbInitialized) {
+    try {
+      console.log('🌐 Initializing database connection...');
+      await connectDB();
+      console.log('✅ Database connection established');
+      
+      await createAdminIfNotExists();
+      console.log('👤 Admin user verified');
+      
+      dbInitialized = true;
+    } catch (err) {
+      console.error('❌ Database initialization failed:', err);
+      // Don't throw error - let individual routes handle DB reconnection
     }
-    
-    server.listen(PORT, () => {
-      console.log('🚀 Server started on port:' + PORT);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
   }
 };
 
-// Start server in all environments
-// For Vercel, this won't actually start a listening server
-// but the Express handlers will still work
-startServer();
+// Initialize on startup
+initializeApp();
+
+// For Vercel serverless functions
+export default app;
+
+// Start server for local development
+if (process.env.NODE_ENV !== 'production') {
+  const startServer = async () => {
+    try {
+      await initializeApp();
+      
+      server.listen(PORT, () => {
+        console.log(`🚀 Server started on port: ${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV}`);
+      });
+    } catch (error) {
+      console.error('❌ Failed to start server:', error);
+    }
+  };
+
+  startServer();
+}
