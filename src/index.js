@@ -9,19 +9,65 @@ import authRoutes from './routes/auth.route.js';
 import messageRoutes from './routes/message.route.js';
 import { connectDB } from './lib/db.js';
 import { createAdminIfNotExists } from './lib/createAdmin.js';
+
 const app = express();
-app.use(cookieParser()) 
+app.use(cookieParser());
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
-app.use(cors({
-  origin:'http://localhost:5173',
-  credentials:true,
-}))
 
-const PORT=process.env.PORT || 5001
-app.use('/api/auth',authRoutes)
-app.use('/api/message',messageRoutes)
+// Update CORS for production
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
+  : ['http://localhost:5173', 'http://localhost:3000'];
+
+console.log('CORS settings:', {
+  environment: process.env.NODE_ENV,
+  allowedOrigins
+});
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      console.log(`Origin ${origin} not allowed by CORS`);
+      // Consider allowing all origins in development
+      if (process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      return callback(null, allowedOrigins[0]); // Default to first allowed origin
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+const PORT = process.env.PORT || 3000;
+
+// Add a test route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Backend is working now!',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Health check route
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/message', messageRoutes);
 
 // Create HTTP server
 const server = createServer(app);
@@ -101,8 +147,47 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log('Server started on port:' + PORT);
-  connectDB()
-  createAdminIfNotExists()
-});
+// Initialize database connection
+let dbInitialized = false;
+
+const initializeApp = async () => {
+  if (!dbInitialized) {
+    try {
+      console.log('🌐 Initializing database connection...');
+      await connectDB();
+      console.log('✅ Database connection established');
+      
+      await createAdminIfNotExists();
+      console.log('👤 Admin user verified');
+      
+      dbInitialized = true;
+    } catch (err) {
+      console.error('❌ Database initialization failed:', err);
+      // Don't throw error - let individual routes handle DB reconnection
+    }
+  }
+};
+
+// Initialize on startup
+initializeApp();
+
+// For Vercel serverless functions
+export default app;
+
+// Start server for local development
+if (process.env.NODE_ENV !== 'production') {
+  const startServer = async () => {
+    try {
+      await initializeApp();
+      
+      server.listen(PORT, () => {
+        console.log(`🚀 Server started on port: ${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV}`);
+      });
+    } catch (error) {
+      console.error('❌ Failed to start server:', error);
+    }
+  };
+
+  startServer();
+}

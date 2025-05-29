@@ -2,6 +2,47 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
+import { connectDB } from "../lib/db.js";
+
+// Helper function to ensure DB connection
+const ensureDbConnected = async () => {
+  try {
+    // Import mongoose safely (avoiding any undefined issues)
+    let mongoose;
+    try {
+      mongoose = (await import('mongoose')).default;
+    } catch (importError) {
+      console.log('Error importing mongoose, trying direct import');
+      const mongooseModule = await import('mongoose');
+      mongoose = mongooseModule;
+    }
+    
+    // Check connection status safely
+    let needsConnection = true;
+    
+    if (mongoose && mongoose.connection) {
+      try {
+        const state = mongoose.connection.readyState;
+        needsConnection = state !== 1; // 1 means connected
+        console.log(`MongoDB connection state: ${state} (${needsConnection ? 'needs connection' : 'already connected'})`);
+      } catch (stateError) {
+        console.log('Error checking mongoose state:', stateError.message);
+      }
+    }
+    
+    if (needsConnection) {
+      console.log('MongoDB not connected or state check failed, connecting now...');
+      await connectDB();
+      console.log('MongoDB connection attempt completed');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("Failed to connect to database:", error);
+    // Don't throw, just return false to allow degraded operation
+    return false;
+  }
+};
 
 export const signup = async (req, res) => {
   const {
@@ -135,12 +176,39 @@ export const signup = async (req, res) => {
   }
 };
 export const login = async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const user = await User.findOne({ email });
+  // CORS Headers
+  // res.setHeader('Access-Control-Allow-Origin', 'https://boneandbone.netlify.app');
+  // res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  // res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+ 
+  // if (req.method === 'OPTIONS') {
+  //   return res.status(200).end();
+  // }
+
+  const { email, password } = req.body;  try {
+    // Ensure MongoDB is connected
+    await ensureDbConnected();
+    
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    // Use a timeout promise to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Database query timed out')), 8000)
+    );
+    
+    // Find user with timeout protection
+    const userPromise = User.findOne({ email });
+    const user = await Promise.race([userPromise, timeoutPromise]);
+    
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+
     const isPasswordMatch = await bcrypt.compare(password, user.password);
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -168,6 +236,7 @@ export const login = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
 export const logout = (req, res) => {
   try {
     res.cookie("jwt", "", {
