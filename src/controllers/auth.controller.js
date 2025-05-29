@@ -145,16 +145,26 @@ export const login = async (req, res) => {
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+    
+    console.log('🔐 Generating token for user:', user._id, user.email);
     const token = generateToken(user._id, res);
+    console.log('✅ Token generated and cookie set');
+    
     return res.status(200).json({
-      token,
       _id: user._id,
-      fullName: user.fullName,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName} ${user.lastName}`,
       email: user.email,
       profilePic: user.profilePic,
+      bio: user.bio,
+      location: user.location,
+      role: user.role,
+      dateOfBirth: user.dateOfBirth,
+      gender: user.gender,
     });
   } catch (error) {
-    console.log(error);
+    console.log('❌ Login error:', error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -180,7 +190,35 @@ export const getUserDetails = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.status(200).json(user);
+    // Return the same structured data as login and checkAuth
+    res.status(200).json({
+      id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName} ${user.lastName}`,
+      email: user.email,
+      profilePic: user.profilePic,
+      bio: user.bio,
+      location: user.location,
+      role: user.role,
+      dateOfBirth: user.dateOfBirth,
+      gender: user.gender,
+      interests: user.interests,
+      lookingFor: user.lookingFor,
+      preferredAgeRange: user.preferredAgeRange,
+      phoneNumber: user.phoneNumber,
+      hairs: user.hairs,
+      eyes: user.eyes,
+      height: user.height,
+      weight: user.weight,
+      sociability: user.sociability,
+      relationship: user.relationship,
+      orientation: user.orientation,
+      smoking: user.smoking,
+      alcohol: user.alcohol,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Internal Server Error" });
@@ -304,13 +342,33 @@ export const updateProfile = async (req, res) => {
 //check auth
 export const checkAuth = (req, res) => {
   try {
+    console.log('🔍 CheckAuth called, cookies:', req.cookies);
+    console.log('🔍 JWT cookie:', req.cookies?.jwt);
+    console.log('🔍 Req.user:', req.user ? 'User found' : 'No user');
+    
     if (req.user) {
-      return res.status(200).json(req.user);
+      console.log('✅ User authenticated:', req.user._id, req.user.email);
+      
+      // Return the same structured data as login
+      return res.status(200).json({
+        _id: req.user._id,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        fullName: `${req.user.firstName} ${req.user.lastName}`,
+        email: req.user.email,
+        profilePic: req.user.profilePic,
+        bio: req.user.bio,
+        location: req.user.location,
+        role: req.user.role,
+        dateOfBirth: req.user.dateOfBirth,
+        gender: req.user.gender,
+      });
     } else {
+      console.log('❌ No user found in request');
       return res.status(401).json({ message: "Unauthorized" });
     }
   } catch (error) {
-    console.log(error);
+    console.log('❌ CheckAuth error:', error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -318,11 +376,40 @@ export const checkAuth = (req, res) => {
 export const getUsers = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;
-    const users = await User.find({ _id: { $ne: loggedInUserId } }).select(
-      "-password"
-    );
-    console.log("Fetched Users:", users);
-    res.status(200).json(users);
+    const users = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
+    
+    // Structure the data consistently like other functions
+    const structuredUsers = users.map(user => ({
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName} ${user.lastName}`,
+      email: user.email,
+      profilePic: user.profilePic,
+      bio: user.bio,
+      location: user.location,
+      role: user.role,
+      dateOfBirth: user.dateOfBirth,
+      gender: user.gender,
+      interests: user.interests,
+      lookingFor: user.lookingFor,
+      preferredAgeRange: user.preferredAgeRange,
+      phoneNumber: user.phoneNumber,
+      hairs: user.hairs,
+      eyes: user.eyes,
+      height: user.height,
+      weight: user.weight,
+      sociability: user.sociability,
+      relationship: user.relationship,
+      orientation: user.orientation,
+      smoking: user.smoking,
+      alcohol: user.alcohol,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    }));
+    
+    console.log("Fetched Users:", structuredUsers.length);
+    res.status(200).json(structuredUsers);
   } catch (error) {
     console.error("Error fetching users:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -332,20 +419,49 @@ export const getUsers = async (req, res) => {
 // Get specific user details by ID
 export const getUserById = async (req, res) => {
   try {
-    const { userId } = req.params; // Get user ID from URL params
+    const { userId } = req.params;
     
-    // Validate if userId is provided
     if (!userId) {
       return res.status(400).json({ message: "User ID is required" });
     }
 
-    const user = await User.findById(userId).select("-password"); // don't send password
+    const user = await User.findById(userId).select("-password");
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.status(200).json(user);
+    // Return all user data in structured format
+    const structuredUser = {
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      fullName: `${user.firstName} ${user.lastName}`,
+      email: user.email,
+      profilePic: user.profilePic,
+      bio: user.bio,
+      location: user.location,
+      role: user.role,
+      dateOfBirth: user.dateOfBirth,
+      gender: user.gender,
+      interests: user.interests,
+      lookingFor: user.lookingFor,
+      preferredAgeRange: user.preferredAgeRange,
+      phoneNumber: user.phoneNumber,
+      hairs: user.hairs,
+      eyes: user.eyes,
+      height: user.height,
+      weight: user.weight,
+      sociability: user.sociability,
+      relationship: user.relationship,
+      orientation: user.orientation,
+      smoking: user.smoking,
+      alcohol: user.alcohol,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+
+    res.status(200).json(structuredUser);
   } catch (error) {
     console.error("Error fetching user by ID:", error);
     res.status(500).json({ message: "Internal Server Error" });
