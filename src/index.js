@@ -7,6 +7,8 @@ import { Server } from 'socket.io';
 dotenv.config();
 import authRoutes from './routes/auth.route.js';
 import messageRoutes from './routes/message.route.js';
+import swipeRoutes from './routes/swipe.route.js'; // Add this import
+import friendRequestRoutes from './routes/friendRequest.route.js'; // Add this import
 import { connectDB } from './lib/db.js';
 import { createAdminIfNotExists } from './lib/createAdmin.js';
 
@@ -66,8 +68,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/message', messageRoutes);
+app.use('/api/swipe', swipeRoutes); // Add this line
+app.use('/api/friend-request', friendRequestRoutes); // Add this line
 
 // Create HTTP server
 const server = createServer(app);
@@ -118,6 +123,45 @@ io.on('connection', (socket) => {
       io.to(receiverSocketId).emit('newMessageNotification', {
         senderId: message.senderId,
         message: message.text ? message.text : 'Sent you an image',
+      });
+    }
+  });
+
+  // Add new socket events for swipe notifications
+  socket.on('newMatch', (matchData) => {
+    const { user1Id, user2Id, matchInfo } = matchData;
+    
+    // Send match notification to both users
+    const user1SocketId = onlineUsers.get(user1Id);
+    const user2SocketId = onlineUsers.get(user2Id);
+    
+    if (user1SocketId) {
+      io.to(user1SocketId).emit('matchNotification', {
+        type: 'new_match',
+        matchedUser: matchInfo.user2,
+        message: "It's a match! 🎉"
+      });
+    }
+    
+    if (user2SocketId) {
+      io.to(user2SocketId).emit('matchNotification', {
+        type: 'new_match',
+        matchedUser: matchInfo.user1,
+        message: "It's a match! 🎉"
+      });
+    }
+  });
+
+  // Friend request notifications
+  socket.on('friendRequestSent', (data) => {
+    const { recipientId, requesterInfo } = data;
+    const recipientSocketId = onlineUsers.get(recipientId);
+    
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('friendRequestNotification', {
+        type: 'friend_request',
+        requester: requesterInfo,
+        message: `${requesterInfo.fullName} sent you a friend request!`
       });
     }
   });
@@ -182,7 +226,7 @@ if (process.env.NODE_ENV !== 'production') {
       
       server.listen(PORT, () => {
         console.log(`🚀 Server started on port: ${PORT}`);
-        console.log(`Environment: ${process.env.NODE_ENV}`);
+        
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);

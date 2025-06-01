@@ -32,7 +32,12 @@ const userSchema = new mongoose.Schema(
     alcohol: { type: String },
     relationship: { type: String },
     
-    role: { type: String, enum: ['admin', 'customer'], default: 'customer' }
+    role: { type: String, enum: ['admin', 'customer'], default: 'customer' },
+    
+    friends: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }]
   },
   { timestamps: true }
 );
