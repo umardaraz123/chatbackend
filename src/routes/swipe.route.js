@@ -6,7 +6,8 @@ import {
   getMatches,
   getDetailedMatches,
   getLikedUsers, 
-  getSwipeStats 
+  getSwipeStats,
+  getReceivedSwipes
 } from '../controllers/swipe.controller.js';
 import { protectRoute } from '../middleware/auth.middleware.js';
 
@@ -18,5 +19,6 @@ router.get('/matches', protectRoute, getMatches);
 router.get('/matches/detailed', protectRoute, getDetailedMatches);
 router.get('/liked', protectRoute, getLikedUsers);
 router.get('/stats', protectRoute, getSwipeStats);
+router.get('/received', protectRoute, getReceivedSwipes);
 
 export default router;
