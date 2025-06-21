@@ -21,7 +21,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Update CORS for production
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
-  : ['http://localhost:5173', 'http://localhost:3000'];
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://192.168.18.118:5173/'];
 
 console.log('CORS settings:', {
   environment: process.env.NODE_ENV,
@@ -223,8 +223,8 @@ if (process.env.NODE_ENV !== 'production') {
   const startServer = async () => {
     try {
       await initializeApp();
-      
-      server.listen(PORT, () => {
+
+      server.listen(PORT,'0.0.0.0', () => {
         console.log(`🚀 Server started on port: ${PORT}`);
         
       });
