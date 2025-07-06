@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+// File retained for database connection logic if needed.
+
 // Track connection state
 let isConnected = false;
 

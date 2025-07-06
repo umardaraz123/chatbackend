@@ -5,47 +5,57 @@ import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 dotenv.config();
+import userRoutes from './routes/user.route.js';
+import productRoutes from './routes/product.route.js';
 import authRoutes from './routes/auth.route.js';
-import messageRoutes from './routes/message.route.js';
-import swipeRoutes from './routes/swipe.route.js'; // Add this import
-import friendRequestRoutes from './routes/friendRequest.route.js'; // Add this import
 import { connectDB } from './lib/db.js';
-import { createAdminIfNotExists } from './lib/createAdmin.js';
+import { createAdmin } from './controllers/user.controller.js';
 
 const app = express();
 app.use(cookieParser());
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Update CORS for production
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '10mb' })); // or higher, e.g. '20mb'
+// Update the allowedOrigins array to include your mobile IP without trailing slash
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
-  : ['http://localhost:5173', 'http://localhost:3000', 'http://192.168.18.118:5173/'];
+  : [
+      'http://localhost:5173', 
+      'http://localhost:3000', 
+      'http://192.168.18.118:5173'  // Remove the trailing slash
+    ];
 
-console.log('CORS settings:', {
-  environment: process.env.NODE_ENV,
-  allowedOrigins
-});
-
+// Also update CORS to be more permissive in development
 app.use(cors({
   origin: function(origin, callback) {
+    console.log('Request origin:', origin); // Debug log
+    
     // Allow requests with no origin (like mobile apps, curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) === -1) {
-      console.log(`Origin ${origin} not allowed by CORS`);
-      // Consider allowing all origins in development
-      if (process.env.NODE_ENV !== 'production') {
+    // In development, be more permissive
+    if (process.env.NODE_ENV !== 'production') {
+      // Allow any origin that starts with your IP
+      if (origin.startsWith('http://192.168.18.118')) {
         return callback(null, true);
       }
-      return callback(null, allowedOrigins[0]); // Default to first allowed origin
+      // Allow localhost origins
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
     }
-    return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    console.log(`Origin ${origin} not allowed by CORS`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
 
 const PORT = process.env.PORT || 3000;
@@ -59,20 +69,11 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check route
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK',
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString()
-  });
-});
 
 // API Routes
+app.use('/api/users', userRoutes);
+app.use('/api/products', productRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/message', messageRoutes);
-app.use('/api/swipe', swipeRoutes); // Add this line
-app.use('/api/friend-request', friendRequestRoutes); // Add this line
 
 // Create HTTP server
 const server = createServer(app);
@@ -88,108 +89,8 @@ const io = new Server(server, {
   }
 });
 
-// Online users mapping
-const onlineUsers = new Map();
 
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
 
-  // User comes online
-  socket.on('online', (userId) => {
-    onlineUsers.set(userId, socket.id);
-    io.emit('userOnlineStatus', Array.from(onlineUsers.keys()));
-  });
-
-  // User joins a chat room (room name will be a composite of both user IDs)
-  socket.on('joinChat', (chatRoom) => {
-    socket.join(chatRoom);
-    console.log(`User joined room: ${chatRoom}`);
-  });
-
-  // User sends a message
-  socket.on('sendMessage', (message) => {
-    const receiverSocketId = onlineUsers.get(message.receiverId);
-    
-    // Create a room name (using sorted user IDs to ensure consistency)
-    const users = [message.senderId, message.receiverId].sort();
-    const room = `chat_${users[0]}_${users[1]}`;
-    
-    // Send to the room (both sender and receiver)
-    io.to(room).emit('receiveMessage', message);
-    
-    // If receiver is online, send notification
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('newMessageNotification', {
-        senderId: message.senderId,
-        message: message.text ? message.text : 'Sent you an image',
-      });
-    }
-  });
-
-  // Add new socket events for swipe notifications
-  socket.on('newMatch', (matchData) => {
-    const { user1Id, user2Id, matchInfo } = matchData;
-    
-    // Send match notification to both users
-    const user1SocketId = onlineUsers.get(user1Id);
-    const user2SocketId = onlineUsers.get(user2Id);
-    
-    if (user1SocketId) {
-      io.to(user1SocketId).emit('matchNotification', {
-        type: 'new_match',
-        matchedUser: matchInfo.user2,
-        message: "It's a match! 🎉"
-      });
-    }
-    
-    if (user2SocketId) {
-      io.to(user2SocketId).emit('matchNotification', {
-        type: 'new_match',
-        matchedUser: matchInfo.user1,
-        message: "It's a match! 🎉"
-      });
-    }
-  });
-
-  // Friend request notifications
-  socket.on('friendRequestSent', (data) => {
-    const { recipientId, requesterInfo } = data;
-    const recipientSocketId = onlineUsers.get(recipientId);
-    
-    if (recipientSocketId) {
-      io.to(recipientSocketId).emit('friendRequestNotification', {
-        type: 'friend_request',
-        requester: requesterInfo,
-        message: `${requesterInfo.fullName} sent you a friend request!`
-      });
-    }
-  });
-
-  // User starts typing
-  socket.on('typing', ({chatRoom, userId}) => {
-    socket.to(chatRoom).emit('userTyping', userId);
-  });
-
-  // User stops typing
-  socket.on('stopTyping', (chatRoom) => {
-    socket.to(chatRoom).emit('userStoppedTyping');
-  });
-
-  // User goes offline
-  socket.on('disconnect', () => {
-    console.log('A user disconnected:', socket.id);
-    
-    // Find and remove disconnected user
-    for (const [key, value] of onlineUsers.entries()) {
-      if (value === socket.id) {
-        onlineUsers.delete(key);
-        io.emit('userOnlineStatus', Array.from(onlineUsers.keys()));
-        break;
-      }
-    }
-  });
-});
 
 // Initialize database connection
 let dbInitialized = false;
@@ -201,8 +102,9 @@ const initializeApp = async () => {
       await connectDB();
       console.log('✅ Database connection established');
       
-      await createAdminIfNotExists();
-      console.log('👤 Admin user verified');
+      // Create admin user after DB connection
+      await createAdmin();
+      console.log('✅ Admin user ensured');
       
       dbInitialized = true;
     } catch (err) {

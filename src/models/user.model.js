@@ -1,47 +1,20 @@
+
 import mongoose from 'mongoose';
 
-const userSchema = new mongoose.Schema(
-  {
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    dateOfBirth: { type: Date, required: true },
-    gender: { type: String, required: true },
- 
-    profilePic: { type: String },
-    bio: { type: String },
-    location: { type: String },
-    interests: { type: [String], default: [] }, // Ensure it's an array
-    lookingFor: { type: String },
-    
-    // Support both formats for backward compatibility
-    preferredAgeRange: { 
-      type: mongoose.Schema.Types.Mixed, // Allows both string and object
-      default: { min: 18, max: 100 }
-    },
-    
-    phoneNumber: { type: String },
-    hairs: { type: String },
-    eyes: { type: String },
-    height: { type: String },
-    weight: { type: String },
-    sociability: { type: String },
-    orientation: { type: String },
-    smoking: { type: String },
-    alcohol: { type: String },
-    relationship: { type: String },
-    
-    role: { type: String, enum: ['admin', 'customer'], default: 'customer' },
-    
-    friends: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }]
-  },
-  { timestamps: true }
-);
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  identity: { type: String },
+  profile: { type: String },
+  email: { type: String, required: true, unique: true },
+  phone: { type: String },
+  shopName: { type: String },
+  approved: { type: Boolean, default: false },
+  password: { type: String, required: true },
+  role: { type: String, enum: ['admin', 'seller'], default: 'seller' },
+  creditAmount: { type: Number, default: 0 },
+  totalOrders: { type: Number, default: 0 },
+  pendingAmount: { type: Number, default: 0 },
+}, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);
-
 export default User;
