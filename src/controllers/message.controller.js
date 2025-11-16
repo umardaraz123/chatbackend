@@ -52,7 +52,7 @@ export const sendMessage = async (req, res) => {
   try {
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
-    const { text, image } = req.body;
+    const { text, image, audio, audioDuration } = req.body;
 
     // Validate user ID
     if (!mongoose.Types.ObjectId.isValid(receiverId)) {
@@ -71,6 +71,9 @@ export const sendMessage = async (req, res) => {
       receiverId,
       text,
       image,
+      audio,
+      audioDuration,
+      read: false,
     });
 
     // Save message to database
@@ -81,6 +84,49 @@ export const sendMessage = async (req, res) => {
     return res.status(201).json(newMessage);
   } catch (error) {
     console.error("Error in sendMessage controller: ", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// Mark messages as read
+export const markMessagesAsRead = async (req, res) => {
+  try {
+    const { id: senderId } = req.params;
+    const receiverId = req.user._id;
+
+    // Update all unread messages from sender to receiver
+    await Message.updateMany(
+      {
+        senderId,
+        receiverId,
+        read: false,
+      },
+      {
+        read: true,
+      }
+    );
+
+    return res.status(200).json({ message: "Messages marked as read" });
+  } catch (error) {
+    console.error("Error in markMessagesAsRead controller: ", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// Get unread messages count
+export const getUnreadCount = async (req, res) => {
+  try {
+    const receiverId = req.user._id;
+
+    // Count unread messages for current user
+    const unreadCount = await Message.countDocuments({
+      receiverId,
+      read: false,
+    });
+
+    return res.status(200).json({ unreadCount });
+  } catch (error) {
+    console.error("Error in getUnreadCount controller: ", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };

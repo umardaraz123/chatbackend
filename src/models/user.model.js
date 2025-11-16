@@ -10,7 +10,11 @@ const userSchema = new mongoose.Schema(
     gender: { type: String, required: true },
  
     profilePic: { type: String },
+    photos: [{ type: String }], // Array of photo URLs for gallery
+    videos: [{ type: String }], // Array of video URLs
     bio: { type: String },
+    profession: { type: String }, // Professional title (e.g., "Professional model")
+    lifeGoal: { type: String }, // Life goal/quote
     location: { type: String },
     interests: { type: [String], default: [] }, // Ensure it's an array
     lookingFor: { type: String },

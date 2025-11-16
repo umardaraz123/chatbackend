@@ -3,6 +3,8 @@ import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
 import { connectDB } from "../lib/db.js";
+import PasswordReset from "../models/passwordReset.model.js";
+import { sendOTPEmail, sendPasswordResetSuccessEmail } from "../lib/emailService.js";
 
 // Helper function to ensure DB connection
 const ensureDbConnected = async () => {
@@ -267,7 +269,11 @@ export const getUserDetails = async (req, res) => {
       fullName: `${user.firstName} ${user.lastName}`,
       email: user.email,
       profilePic: user.profilePic,
+      photos: user.photos || [],
+      videos: user.videos || [],
       bio: user.bio,
+      profession: user.profession,
+      lifeGoal: user.lifeGoal,
       location: user.location,
       role: user.role,
       dateOfBirth: user.dateOfBirth,
@@ -303,12 +309,16 @@ export const updateProfile = async (req, res) => {
     dateOfBirth,
     gender,
     bio,
+    profession,
+    lifeGoal,
     location,
     interests,
     lookingFor,
     preferredAgeRange,
     phoneNumber,
     profilePic,
+    photos, // Array of photos
+    videos, // Array of videos
     hairs,
     eyes,
     height,
@@ -345,12 +355,54 @@ export const updateProfile = async (req, res) => {
       }
     }
 
+    // Handle multiple photos upload
+    if (photos && Array.isArray(photos)) {
+      try {
+        const uploadedPhotos = [];
+        for (const photo of photos) {
+          if (photo.startsWith('data:')) { // Only upload new base64 images
+            const uploadResponse = await cloudinary.uploader.upload(photo);
+            uploadedPhotos.push(uploadResponse.secure_url);
+          } else {
+            uploadedPhotos.push(photo); // Keep existing URLs
+          }
+        }
+        user.photos = uploadedPhotos;
+        console.log("📸 Photos uploaded successfully:", uploadedPhotos.length);
+      } catch (uploadError) {
+        console.error("❌ Photos upload error:", uploadError);
+      }
+    }
+
+    // Handle videos upload
+    if (videos && Array.isArray(videos)) {
+      try {
+        const uploadedVideos = [];
+        for (const video of videos) {
+          if (video.startsWith('data:')) { // Only upload new base64 videos
+            const uploadResponse = await cloudinary.uploader.upload(video, {
+              resource_type: 'video'
+            });
+            uploadedVideos.push(uploadResponse.secure_url);
+          } else {
+            uploadedVideos.push(video); // Keep existing URLs
+          }
+        }
+        user.videos = uploadedVideos;
+        console.log("🎥 Videos uploaded successfully:", uploadedVideos.length);
+      } catch (uploadError) {
+        console.error("❌ Videos upload error:", uploadError);
+      }
+    }
+
     // Update only provided fields
     if (firstName) user.firstName = firstName;
     if (lastName) user.lastName = lastName;
     if (dateOfBirth) user.dateOfBirth = dateOfBirth;
     if (gender) user.gender = gender;
     if (bio) user.bio = bio;
+    if (profession) user.profession = profession;
+    if (lifeGoal) user.lifeGoal = lifeGoal;
     if (location) user.location = location;
     if (interests) user.interests = interests;
     if (lookingFor) user.lookingFor = lookingFor;
@@ -381,8 +433,12 @@ export const updateProfile = async (req, res) => {
       fullName: `${user.firstName} ${user.lastName}`,
       email: user.email,
       profilePic: user.profilePic,
+      photos: user.photos || [],
+      videos: user.videos || [],
       gender: user.gender,
       bio: user.bio,
+      profession: user.profession,
+      lifeGoal: user.lifeGoal,
       location: user.location,
       interests: user.interests,
       lookingFor: user.lookingFor,
@@ -894,5 +950,368 @@ export const getMatchDetails = async (req, res) => {
   } catch (error) {
     console.error("Error getting match details:", error);
     res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// Request Password Reset - Send OTP via Email
+export const requestPasswordReset = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // Validate email
+    if (!email || !email.trim()) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    
+    if (!user) {
+      // Don't reveal if user exists or not (security best practice)
+      return res.status(200).json({ 
+        message: "If an account exists with this email, you will receive a password reset code." 
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Hash OTP before storing
+    const salt = await bcrypt.genSalt(10);
+    const hashedOTP = await bcrypt.hash(otp, salt);
+
+    // Delete any existing OTP for this email
+    await PasswordReset.deleteMany({ email: email.toLowerCase().trim() });
+
+    // Save OTP to database
+    const passwordReset = new PasswordReset({
+      email: email.toLowerCase().trim(),
+      otp: hashedOTP,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    await passwordReset.save();
+
+    // Send OTP email
+    try {
+      await sendOTPEmail(email, otp, user.firstName);
+      console.log(`✅ OTP sent to ${email}`);
+    } catch (emailError) {
+      console.error("Error sending email:", emailError);
+      return res.status(500).json({ message: "Failed to send email. Please try again." });
+    }
+
+    return res.status(200).json({ 
+      message: "Password reset code sent to your email. Please check your inbox.",
+      email: email 
+    });
+
+  } catch (error) {
+    console.error("Error in requestPasswordReset:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Verify OTP
+export const verifyOTP = async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    // Validate input
+    if (!email || !otp) {
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
+    if (otp.length !== 6) {
+      return res.status(400).json({ message: "OTP must be 6 digits" });
+    }
+
+    // Find the most recent unused OTP for this email
+    const passwordReset = await PasswordReset.findOne({
+      email: email.toLowerCase().trim(),
+      isUsed: false,
+    }).sort({ createdAt: -1 });
+
+    if (!passwordReset) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    // Check if OTP has expired
+    if (new Date() > passwordReset.expiresAt) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    // Verify OTP
+    const isValidOTP = await bcrypt.compare(otp, passwordReset.otp);
+
+    if (!isValidOTP) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    // OTP is valid - return success
+    return res.status(200).json({ 
+      message: "OTP verified successfully",
+      email: email 
+    });
+
+  } catch (error) {
+    console.error("Error in verifyOTP:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Reset Password
+export const resetPassword = async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+
+  try {
+    // Validate input
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: "Email, OTP, and new password are required" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    // Find the most recent unused OTP for this email
+    const passwordReset = await PasswordReset.findOne({
+      email: email.toLowerCase().trim(),
+      isUsed: false,
+    }).sort({ createdAt: -1 });
+
+    if (!passwordReset) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    // Check if OTP has expired
+    if (new Date() > passwordReset.expiresAt) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    // Verify OTP
+    const isValidOTP = await bcrypt.compare(otp, passwordReset.otp);
+
+    if (!isValidOTP) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update user password
+    user.password = hashedPassword;
+    await user.save();
+
+    // Mark OTP as used
+    passwordReset.isUsed = true;
+    await passwordReset.save();
+
+    // Send success email
+    try {
+      await sendPasswordResetSuccessEmail(email, user.firstName);
+    } catch (emailError) {
+      console.error("Error sending success email:", emailError);
+      // Don't fail the request if email fails
+    }
+
+    console.log(`✅ Password reset successful for ${email}`);
+
+    return res.status(200).json({ 
+      message: "Password reset successful. You can now login with your new password." 
+    });
+
+  } catch (error) {
+    console.error("Error in resetPassword:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Send Signup OTP
+export const sendSignupOTP = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // Validate email
+    if (!email || !email.trim()) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already registered. Please login instead." });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Hash OTP before storing
+    const salt = await bcrypt.genSalt(10);
+    const hashedOTP = await bcrypt.hash(otp, salt);
+
+    // Delete any existing OTP for this email
+    await PasswordReset.deleteMany({ email: email.toLowerCase().trim() });
+
+    // Save OTP to database (reusing PasswordReset model)
+    const signupOTP = new PasswordReset({
+      email: email.toLowerCase().trim(),
+      otp: hashedOTP,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    await signupOTP.save();
+
+    // Send OTP email
+    try {
+      await sendOTPEmail(email, otp, 'User');
+      console.log(`✅ Signup OTP sent to ${email}`);
+    } catch (emailError) {
+      console.error("Error sending email:", emailError);
+      return res.status(500).json({ message: "Failed to send email. Please try again." });
+    }
+
+    return res.status(200).json({ 
+      message: "Verification code sent to your email. Please check your inbox.",
+      email: email 
+    });
+
+  } catch (error) {
+    console.error("Error in sendSignupOTP:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Verify Signup OTP
+export const verifySignupOTP = async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    // Validate input
+    if (!email || !otp) {
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
+    if (otp.length !== 6) {
+      return res.status(400).json({ message: "OTP must be 6 digits" });
+    }
+
+    // Find the most recent unused OTP for this email
+    const signupOTP = await PasswordReset.findOne({
+      email: email.toLowerCase().trim(),
+      isUsed: false,
+    }).sort({ createdAt: -1 });
+
+    if (!signupOTP) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    // Check if OTP has expired
+    if (new Date() > signupOTP.expiresAt) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    // Verify OTP
+    const isValidOTP = await bcrypt.compare(otp, signupOTP.otp);
+
+    if (!isValidOTP) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    // Mark OTP as used
+    signupOTP.isUsed = true;
+    await signupOTP.save();
+
+    // OTP is valid - return success
+    return res.status(200).json({ 
+      message: "Email verified successfully",
+      email: email,
+      verified: true
+    });
+
+  } catch (error) {
+    console.error("Error in verifySignupOTP:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Complete Signup with all details
+export const completeSignup = async (req, res) => {
+  const {
+    email,
+    password,
+    fullName,
+    userName,
+    phoneNumber,
+    dateOfBirth,
+    gender,
+  } = req.body;
+
+  try {
+    // Validate required fields
+    if (!email || !password || !fullName || !userName || !dateOfBirth || !gender) {
+      return res.status(400).json({ message: "Please fill all required fields" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    // Check if email already exists
+    const emailExists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (emailExists) {
+      return res.status(400).json({ message: "Email already registered" });
+    }
+
+    // Split fullName into firstName and lastName
+    const nameParts = fullName.trim().split(' ');
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || nameParts[0];
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create new user
+    const newUser = new User({
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      phoneNumber: phoneNumber || '',
+      role: "customer",
+    });
+
+    await newUser.save();
+
+    // Generate Token
+    const token = generateToken(newUser._id, res);
+
+    // Return user data (excluding password)
+    return res.status(201).json({
+      token,
+      _id: newUser._id,
+      fullName: `${newUser.firstName} ${newUser.lastName}`,
+      email: newUser.email,
+      profilePic: newUser.profilePic,
+      gender: newUser.gender,
+      phoneNumber: newUser.phoneNumber,
+      role: newUser.role,
+      dateOfBirth: newUser.dateOfBirth,
+    });
+  } catch (error) {
+    console.error("Error in completeSignup:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };

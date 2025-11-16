@@ -15,38 +15,48 @@ import { createAdminIfNotExists } from './lib/createAdmin.js';
 const app = express();
 app.use(cookieParser());
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Increase body size limit for photo/video uploads (100MB for videos)
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// Update CORS for production
+// Update the allowedOrigins array to include your mobile IP without trailing slash
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
-  : ['http://localhost:5173', 'http://localhost:3000', 'http://192.168.18.118:5173/'];
+  : [
+      'http://localhost:5173', 
+      'http://localhost:3000'
+    ];
 
-console.log('CORS settings:', {
-  environment: process.env.NODE_ENV,
-  allowedOrigins
-});
-
+// CORS configuration
 app.use(cors({
   origin: function(origin, callback) {
+    console.log('Request origin:', origin);
+    
     // Allow requests with no origin (like mobile apps, curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) === -1) {
-      console.log(`Origin ${origin} not allowed by CORS`);
-      // Consider allowing all origins in development
-      if (process.env.NODE_ENV !== 'production') {
+    // In development, allow localhost
+    if (process.env.NODE_ENV !== 'production') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         return callback(null, true);
       }
-      return callback(null, allowedOrigins[0]); // Default to first allowed origin
     }
-    return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    console.log(`Origin ${origin} not allowed by CORS`);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Set-Cookie']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 const PORT = process.env.PORT || 3000;
 
@@ -224,8 +234,8 @@ if (process.env.NODE_ENV !== 'production') {
     try {
       await initializeApp();
 
-      server.listen(PORT,'0.0.0.0', () => {
-        console.log(`🚀 Server started on port: ${PORT}`);
+      server.listen(PORT, () => {
+        console.log(`🚀 Server started on http://localhost:${PORT}`);
         
       });
     } catch (error) {
