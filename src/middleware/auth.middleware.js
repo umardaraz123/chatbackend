@@ -27,6 +27,12 @@ export const protectRoute = async (req, res, next) => {
         if (!user) {
             return res.status(401).json({ message: "Unauthorized" });
         }
+        // Update lastActive (throttle: only write if >2 minutes since last update)
+        const now = new Date();
+        const twoMinAgo = new Date(now - 2 * 60 * 1000);
+        if (!user.lastActive || user.lastActive < twoMinAgo) {
+            User.findByIdAndUpdate(user._id, { lastActive: now }).catch(() => {});
+        }
         req.user = user;
         next();
     } catch (error) {

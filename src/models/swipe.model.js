@@ -19,7 +19,7 @@ const swipeSchema = new mongoose.Schema({
   },
   likeType: {
     type: String,
-    enum: ['crush', 'intrigued', 'curious', 'fun'],
+    enum: ['crush', 'intrigued', 'curious', 'fun', 'superLike'],
     default: null
   },
   createdAt: {
@@ -43,12 +43,12 @@ const matchSchema = new mongoose.Schema({
   },
   yourLikeType: {
     type: String,
-    enum: ['crush', 'intrigued', 'curious', 'fun'],
+    enum: ['crush', 'intrigued', 'curious', 'fun', 'superLike'],
     default: null
   },
   theirLikeType: {
     type: String,
-    enum: ['crush', 'intrigued', 'curious', 'fun'],
+    enum: ['crush', 'intrigued', 'curious', 'fun', 'superLike'],
     default: null
   },
   createdAt: {

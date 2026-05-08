@@ -465,7 +465,7 @@ export const updateProfile = async (req, res) => {
 };
 
 //check auth
-export const checkAuth = (req, res) => {
+export const checkAuth = async (req, res) => {
   try {
     console.log('🔍 CheckAuth called, cookies:', req.cookies);
     console.log('🔍 JWT cookie:', req.cookies?.jwt);
@@ -473,8 +473,27 @@ export const checkAuth = (req, res) => {
     
     if (req.user) {
       console.log('✅ User authenticated:', req.user._id, req.user.email);
-      
-      // Return the same structured data as login
+
+      // ─── Daily Login Streak ───────────────────────────────────────────
+      let streak = req.user.streak || 0;
+      try {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const lastDate = req.user.lastStreakDate ? new Date(req.user.lastStreakDate) : null;
+        const lastDay = lastDate ? new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate()) : null;
+        const diffDays = lastDay ? Math.round((today - lastDay) / (1000 * 60 * 60 * 24)) : null;
+
+        if (!lastDay || diffDays > 1) {
+          streak = 1; // reset
+        } else if (diffDays === 1) {
+          streak = (req.user.streak || 0) + 1; // increment
+        }
+        // diffDays === 0 → same day, keep current streak without writing
+        if (diffDays !== 0) {
+          User.findByIdAndUpdate(req.user._id, { streak, lastStreakDate: today }).catch(() => {});
+        }
+      } catch {}
+
       return res.status(200).json({
         _id: req.user._id,
         firstName: req.user.firstName,
@@ -487,6 +506,8 @@ export const checkAuth = (req, res) => {
         role: req.user.role,
         dateOfBirth: req.user.dateOfBirth,
         gender: req.user.gender,
+        streak,
+        lastActive: req.user.lastActive,
       });
     } else {
       console.log('❌ No user found in request');
@@ -1313,5 +1334,172 @@ export const completeSignup = async (req, res) => {
   } catch (error) {
     console.error("Error in completeSignup:", error);
     return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+// ─── BLOCK USER ───────────────────────────────────────────────────
+export const blockUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user._id;
+
+    if (userId === currentUserId.toString()) {
+      return res.status(400).json({ message: 'Cannot block yourself' });
+    }
+
+    const target = await User.findById(userId);
+    if (!target) return res.status(404).json({ message: 'User not found' });
+
+    await User.findByIdAndUpdate(currentUserId, {
+      $addToSet: { blockedUsers: userId }
+    });
+
+    res.json({ success: true, message: 'User blocked successfully' });
+  } catch (err) {
+    console.error('Block user error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    await User.findByIdAndUpdate(req.user._id, {
+      $pull: { blockedUsers: userId }
+    });
+    res.json({ success: true, message: 'User unblocked' });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getBlockedUsers = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate('blockedUsers', 'firstName lastName profilePic');
+    res.json(user.blockedUsers || []);
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PROFILE VIEWS ────────────────────────────────────────────────
+export const recordProfileView = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const viewerId = req.user._id;
+
+    if (userId === viewerId.toString()) return res.json({ success: true }); // Don't record self-views
+
+    const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+    const cutoff = new Date(Date.now() - TWELVE_HOURS);
+
+    // Only add if viewer hasn't viewed this profile in 12h
+    const alreadyViewed = await User.findOne({
+      _id: userId,
+      profileViews: {
+        $elemMatch: { viewer: viewerId, viewedAt: { $gte: cutoff } }
+      }
+    });
+
+    if (!alreadyViewed) {
+      await User.findByIdAndUpdate(userId, {
+        $push: { profileViews: { viewer: viewerId, viewedAt: new Date() } }
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getProfileViews = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate('profileViews.viewer', 'firstName lastName profilePic bio location dateOfBirth interests');
+
+    const views = (user.profileViews || [])
+      .filter(v => v.viewer) // remove deleted accounts
+      .sort((a, b) => b.viewedAt - a.viewedAt) // newest first
+      .slice(0, 50); // return last 50
+
+    const calculateAge = (dob) => {
+      if (!dob) return null;
+      const d = new Date(dob);
+      const t = new Date();
+      let age = t.getFullYear() - d.getFullYear();
+      if (t.getMonth() - d.getMonth() < 0 || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) age--;
+      return age;
+    };
+
+    const structured = views.map(v => ({
+      _id: v.viewer._id,
+      fullName: `${v.viewer.firstName} ${v.viewer.lastName}`,
+      firstName: v.viewer.firstName,
+      profilePic: v.viewer.profilePic,
+      bio: v.viewer.bio,
+      location: v.viewer.location,
+      age: calculateAge(v.viewer.dateOfBirth),
+      interests: v.viewer.interests || [],
+      viewedAt: v.viewedAt
+    }));
+
+    res.json({ views: structured, total: structured.length });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── REPORT USER ────────────────────────────────────────────────────────────
+export const reportUser = async (req, res) => {
+  try {
+    const reporterId = req.user._id;
+    const { userId } = req.params;
+    const { reason } = req.body;
+
+    const validReasons = ['spam', 'fake', 'inappropriate', 'harassment', 'other'];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({ message: 'Invalid report reason' });
+    }
+    if (userId === reporterId.toString()) {
+      return res.status(400).json({ message: 'Cannot report yourself' });
+    }
+    const target = await User.findById(userId);
+    if (!target) return res.status(404).json({ message: 'User not found' });
+
+    const alreadyReported = target.reports?.some(r => r.reporter?.toString() === reporterId.toString());
+    if (alreadyReported) {
+      return res.status(400).json({ message: 'Already reported this user' });
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      $push: { reports: { reporter: reporterId, reason, reportedAt: new Date() } }
+    });
+
+    res.json({ success: true, message: 'Report submitted. Thank you for keeping the community safe.' });
+  } catch (err) {
+    console.error('Report user error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── UPDATE MOOD ─────────────────────────────────────────────────────────────
+export const updateMood = async (req, res) => {
+  try {
+    const { mood } = req.body;
+    const validMoods = ['happy', 'flirty', 'chill', 'adventurous', 'lonely', 'excited', null];
+    if (!validMoods.includes(mood)) {
+      return res.status(400).json({ message: 'Invalid mood' });
+    }
+    const updated = await User.findByIdAndUpdate(
+      req.user._id,
+      { mood, moodUpdatedAt: mood ? new Date() : null },
+      { new: true, select: 'mood moodUpdatedAt' }
+    );
+    res.json({ success: true, mood: updated.mood });
+  } catch (err) {
+    console.error('Update mood error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };

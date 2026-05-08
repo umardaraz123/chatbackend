@@ -41,7 +41,50 @@ const userSchema = new mongoose.Schema(
     friends: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
-    }]
+    }],
+
+    // Block system
+    blockedUsers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
+
+    // Profile Views tracking
+    profileViews: [{
+      viewer: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      viewedAt: { type: Date, default: Date.now }
+    }],
+
+    // Profile Boost (30-min visibility boost)
+    boostActive: { type: Boolean, default: false },
+    boostExpiresAt: { type: Date, default: null },
+    boostCount: { type: Number, default: 3 }, // free boosts per day
+
+    // Super Likes
+    superLikesLeft: { type: Number, default: 5 },
+    superLikesResetAt: { type: Date, default: null },
+
+    // User Mood / Status
+    mood: {
+      type: String,
+      enum: ['happy', 'flirty', 'chill', 'adventurous', 'lonely', 'excited', null],
+      default: null
+    },
+    moodUpdatedAt: { type: Date, default: null },
+
+    // Last Active / Online Status
+    lastActive: { type: Date, default: null },
+
+    // Daily Login Streak
+    streak: { type: Number, default: 0 },
+    lastStreakDate: { type: Date, default: null },
+
+    // Reports
+    reports: [{
+      reporter: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      reason: { type: String, enum: ['spam', 'fake', 'inappropriate', 'harassment', 'other'] },
+      reportedAt: { type: Date, default: Date.now }
+    }],
   },
   { timestamps: true }
 );

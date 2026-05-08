@@ -1,4 +1,8 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
+
+// Use Google's public DNS to resolve SRV records (bypasses ISP/corporate DNS that blocks SRV)
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 
 // Track connection state
 let isConnected = false;
@@ -24,9 +28,10 @@ export const connectDB = async () => {
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 30000, // Increased timeout for Vercel
-      socketTimeoutMS: 60000, // Increased socket timeout
-      maxPoolSize: 10, // Reduce pool size for serverless
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 60000,
+      maxPoolSize: 10,
+      family: 4, // Force IPv4 to avoid IPv6 DNS resolution issues
     });
 
     isConnected = true;

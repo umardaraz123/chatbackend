@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.route.js';
 import messageRoutes from './routes/message.route.js';
 import swipeRoutes from './routes/swipe.route.js'; // Add this import
 import friendRequestRoutes from './routes/friendRequest.route.js'; // Add this import
+import postRoutes from './routes/post.route.js'; // Stories / Posts
 import { connectDB } from './lib/db.js';
 import { createAdminIfNotExists } from './lib/createAdmin.js';
 
@@ -20,32 +21,34 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Update the allowedOrigins array to include your mobile IP without trailing slash
-const allowedOrigins = process.env.NODE_ENV === 'production' 
+const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL || 'https://boneandbone.netlify.app']
   : [
-      'http://localhost:5173', 
-      'http://localhost:3000'
-    ];
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://192.168.18.120:5173',
+    'http://192.168.18.120:5174'
+  ];
 
 // CORS configuration
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     console.log('Request origin:', origin);
-    
+
     // Allow requests with no origin (like mobile apps, curl requests)
     if (!origin) return callback(null, true);
-    
-    // In development, allow localhost
+
+    // In development, allow localhost and local network
     if (process.env.NODE_ENV !== 'production') {
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('192.168.')) {
         return callback(null, true);
       }
     }
-    
+
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    
+
     console.log(`Origin ${origin} not allowed by CORS`);
     return callback(new Error('Not allowed by CORS'));
   },
@@ -62,7 +65,7 @@ const PORT = process.env.PORT || 3000;
 
 // Add a test route
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Backend is working now!',
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString()
@@ -71,7 +74,7 @@ app.get('/', (req, res) => {
 
 // Health check route
 app.get('/api/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'OK',
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString()
@@ -83,6 +86,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/message', messageRoutes);
 app.use('/api/swipe', swipeRoutes); // Add this line
 app.use('/api/friend-request', friendRequestRoutes); // Add this line
+app.use('/api/posts', postRoutes); // Stories / Posts
 
 // Create HTTP server
 const server = createServer(app);
@@ -92,6 +96,8 @@ const io = new Server(server, {
   cors: {
     origin: [
       'http://localhost:5173',
+      'http://192.168.18.120:5173',
+      'http://192.168.18.120:5174',
       'https://boneandbone.netlify.app'
     ],
     credentials: true,
@@ -120,14 +126,14 @@ io.on('connection', (socket) => {
   // User sends a message
   socket.on('sendMessage', (message) => {
     const receiverSocketId = onlineUsers.get(message.receiverId);
-    
+
     // Create a room name (using sorted user IDs to ensure consistency)
     const users = [message.senderId, message.receiverId].sort();
     const room = `chat_${users[0]}_${users[1]}`;
-    
+
     // Send to the room (both sender and receiver)
     io.to(room).emit('receiveMessage', message);
-    
+
     // If receiver is online, send notification
     if (receiverSocketId) {
       io.to(receiverSocketId).emit('newMessageNotification', {
@@ -140,11 +146,11 @@ io.on('connection', (socket) => {
   // Add new socket events for swipe notifications
   socket.on('newMatch', (matchData) => {
     const { user1Id, user2Id, matchInfo } = matchData;
-    
+
     // Send match notification to both users
     const user1SocketId = onlineUsers.get(user1Id);
     const user2SocketId = onlineUsers.get(user2Id);
-    
+
     if (user1SocketId) {
       io.to(user1SocketId).emit('matchNotification', {
         type: 'new_match',
@@ -152,7 +158,7 @@ io.on('connection', (socket) => {
         message: "It's a match! 🎉"
       });
     }
-    
+
     if (user2SocketId) {
       io.to(user2SocketId).emit('matchNotification', {
         type: 'new_match',
@@ -162,11 +168,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Super like notification
+  socket.on('superLikeSent', ({ targetId, senderInfo }) => {
+    const targetSocketId = onlineUsers.get(targetId);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('superLikeReceived', {
+        sender: senderInfo,
+        message: `${senderInfo.fullName} super liked you! ⭐`
+      });
+    }
+  });
+
+  // Profile boost activated notification (optional — can notify friends)
+  socket.on('boostActivated', ({ userId }) => {
+    // Could broadcast to nearby users — for now just acknowledge
+    socket.emit('boostConfirmed', { message: 'Boost activated for 30 minutes!' });
+  });
+
   // Friend request notifications
   socket.on('friendRequestSent', (data) => {
     const { recipientId, requesterInfo } = data;
     const recipientSocketId = onlineUsers.get(recipientId);
-    
+
     if (recipientSocketId) {
       io.to(recipientSocketId).emit('friendRequestNotification', {
         type: 'friend_request',
@@ -177,7 +200,7 @@ io.on('connection', (socket) => {
   });
 
   // User starts typing
-  socket.on('typing', ({chatRoom, userId}) => {
+  socket.on('typing', ({ chatRoom, userId }) => {
     socket.to(chatRoom).emit('userTyping', userId);
   });
 
@@ -189,7 +212,7 @@ io.on('connection', (socket) => {
   // User goes offline
   socket.on('disconnect', () => {
     console.log('A user disconnected:', socket.id);
-    
+
     // Find and remove disconnected user
     for (const [key, value] of onlineUsers.entries()) {
       if (value === socket.id) {
@@ -210,10 +233,10 @@ const initializeApp = async () => {
       console.log('🌐 Initializing database connection...');
       await connectDB();
       console.log('✅ Database connection established');
-      
+
       await createAdminIfNotExists();
       console.log('👤 Admin user verified');
-      
+
       dbInitialized = true;
     } catch (err) {
       console.error('❌ Database initialization failed:', err);
@@ -234,9 +257,10 @@ if (process.env.NODE_ENV !== 'production') {
     try {
       await initializeApp();
 
-      server.listen(PORT, () => {
+      server.listen(PORT, '0.0.0.0', () => {
         console.log(`🚀 Server started on http://localhost:${PORT}`);
-        
+        console.log(`📱 Mobile access: http://192.168.18.120:${PORT}`);
+
       });
     } catch (error) {
       console.error('❌ Failed to start server:', error);

@@ -130,3 +130,44 @@ export const getUnreadCount = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+// Add or remove emoji reaction on a message
+export const reactToMessage = async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { emoji } = req.body;
+    const userId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ error: "Invalid message ID" });
+    }
+    if (!emoji || typeof emoji !== 'string') {
+      return res.status(400).json({ error: "Emoji is required" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ error: "Message not found" });
+
+    // Only sender or receiver may react
+    const allowed = message.senderId.equals(userId) || message.receiverId.equals(userId);
+    if (!allowed) return res.status(403).json({ error: "Forbidden" });
+
+    // Toggle: if same user already reacted with same emoji, remove it
+    const existingIdx = message.reactions.findIndex(
+      r => r.userId.equals(userId) && r.emoji === emoji
+    );
+    if (existingIdx !== -1) {
+      message.reactions.splice(existingIdx, 1);
+    } else {
+      // Remove any previous reaction from this user (one reaction per user)
+      message.reactions = message.reactions.filter(r => !r.userId.equals(userId));
+      message.reactions.push({ userId, emoji });
+    }
+
+    await message.save();
+    return res.status(200).json({ success: true, reactions: message.reactions });
+  } catch (error) {
+    console.error("Error in reactToMessage controller: ", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};

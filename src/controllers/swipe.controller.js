@@ -42,17 +42,34 @@ export const getSwipeableUsers = async (req, res) => {
     const uniqueExcludedIds = [...new Set(excludedUserIds)];
     console.log('Total excluded users:', uniqueExcludedIds.length);
 
+    // Also exclude users who have blocked current user OR current user has blocked
+    const currentUserData = await User.findById(currentUserId).select('blockedUsers');
+    const blockedByMe = currentUserData?.blockedUsers?.map(id => id.toString()) || [];
+    
+    const usersWhoBlockedMe = await User.find({ blockedUsers: currentUserId }).distinct('_id');
+    const blockedMe = usersWhoBlockedMe.map(id => id.toString());
+    
+    const allExcluded = [...new Set([...uniqueExcludedIds, ...blockedByMe, ...blockedMe])];
+
+    // Check for active boosts — boosted users go first
+    const now = new Date();
+    const boostedUsers = await User.find({
+      _id: { $nin: allExcluded },
+      boostActive: true,
+      boostExpiresAt: { $gt: now }
+    }).select('firstName lastName profilePic bio location dateOfBirth interests gender boostActive').lean();
+
     // Get total count first
     const totalUsers = await User.countDocuments({
-      _id: { $nin: uniqueExcludedIds }
+      _id: { $nin: allExcluded }
     });
 
     console.log('Total available users:', totalUsers);
 
     const users = await User.find({
-      _id: { $nin: uniqueExcludedIds }
+      _id: { $nin: allExcluded }
     })
-    .select('firstName lastName profilePic bio location dateOfBirth interests gender')
+    .select('firstName lastName profilePic bio location dateOfBirth interests gender boostActive')
     .skip(skip)
     .limit(limit)
     .lean();
@@ -81,6 +98,13 @@ export const getSwipeableUsers = async (req, res) => {
       age: calculateAge(user.dateOfBirth)
     }));
 
+    // Merge boosted users first (deduplicated), then regular users
+    const boostedWithAge = boostedUsers
+      .filter(b => !users.some(u => u._id.toString() === b._id.toString()))
+      .map(user => ({ ...user, fullName: `${user.firstName} ${user.lastName}`, age: calculateAge(user.dateOfBirth), isBoosted: true }));
+
+    const finalUsers = [...boostedWithAge, ...usersWithAge];
+
     // Add pagination info to response headers
     res.set({
       'X-Total-Count': totalUsers.toString(),
@@ -89,7 +113,7 @@ export const getSwipeableUsers = async (req, res) => {
       'X-Has-More': (skip + users.length < totalUsers).toString()
     });
 
-    res.json(usersWithAge);
+    res.json(finalUsers);
   } catch (error) {
     console.error('Error fetching swipeable users:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -575,3 +599,172 @@ function calculateAge(dateOfBirth) {
   }
   return age;
 }
+
+// ─── SUPER LIKE ───────────────────────────────────────────────────
+export const superLikeUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const swiperId = req.user._id;
+
+    if (userId === swiperId.toString()) {
+      return res.status(400).json({ message: 'Cannot super like yourself' });
+    }
+
+    // Reset daily super likes if needed (24h window)
+    const swiper = await User.findById(swiperId);
+    const now = new Date();
+    if (!swiper.superLikesResetAt || now - swiper.superLikesResetAt > 24 * 60 * 60 * 1000) {
+      swiper.superLikesLeft = 5;
+      swiper.superLikesResetAt = now;
+    }
+
+    if (swiper.superLikesLeft <= 0) {
+      return res.status(429).json({ message: 'No super likes left for today. Resets in 24 hours.' });
+    }
+
+    // Check for existing swipe
+    const existing = await Swipe.findOne({ swiper: swiperId, swiped: userId });
+    if (existing) {
+      return res.status(200).json({ success: true, alreadySwiped: true, message: 'Already swiped' });
+    }
+
+    // Create swipe with superLike action
+    await new Swipe({ swiper: swiperId, swiped: userId, action: 'like', likeType: 'superLike' }).save();
+
+    // Decrement super likes
+    swiper.superLikesLeft -= 1;
+    await swiper.save();
+
+    // Check for mutual match
+    const reciprocal = await Swipe.findOne({ swiper: userId, swiped: swiperId, action: 'like' });
+    let isMatch = false;
+    if (reciprocal) {
+      const existingMatch = await Match.findOne({ users: { $all: [swiperId, userId] } });
+      if (!existingMatch) {
+        await new Match({ users: [swiperId, userId], isMutualEmotion: true, yourLikeType: 'superLike', theirLikeType: reciprocal.likeType, createdAt: now }).save();
+      }
+      isMatch = true;
+    }
+
+    res.json({ success: true, isMatch, superLikesLeft: swiper.superLikesLeft, isSuperLike: true });
+  } catch (err) {
+    console.error('Super like error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── PROFILE BOOST ────────────────────────────────────────────────
+export const boostProfile = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+
+    // Reset boost count if a new day
+    const now = new Date();
+    const lastBoostDate = user.boostExpiresAt ? new Date(user.boostExpiresAt) : null;
+    const isNewDay = !lastBoostDate || (now - lastBoostDate > 24 * 60 * 60 * 1000 && !user.boostActive);
+
+    if (isNewDay && user.boostCount <= 0) {
+      user.boostCount = 3; // reset daily
+    }
+
+    if (user.boostActive && user.boostExpiresAt > now) {
+      const remaining = Math.ceil((user.boostExpiresAt - now) / 60000);
+      return res.status(400).json({ message: `Boost already active (${remaining} min left)`, boostActive: true, minutesLeft: remaining });
+    }
+
+    if (user.boostCount <= 0) {
+      return res.status(429).json({ message: 'No boosts left today. Resets tomorrow.' });
+    }
+
+    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutes
+    user.boostActive = true;
+    user.boostExpiresAt = expiresAt;
+    user.boostCount -= 1;
+    await user.save();
+
+    res.json({ success: true, boostActive: true, boostExpiresAt: expiresAt, boostsLeft: user.boostCount });
+  } catch (err) {
+    console.error('Boost error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getBoostStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('boostActive boostExpiresAt boostCount');
+    const now = new Date();
+
+    // Auto-expire boost
+    if (user.boostActive && user.boostExpiresAt && user.boostExpiresAt <= now) {
+      user.boostActive = false;
+      await user.save();
+    }
+
+    const minutesLeft = user.boostActive && user.boostExpiresAt
+      ? Math.max(0, Math.ceil((user.boostExpiresAt - now) / 60000))
+      : 0;
+
+    res.json({
+      boostActive: user.boostActive,
+      boostExpiresAt: user.boostExpiresAt,
+      minutesLeft,
+      boostsLeft: user.boostCount ?? 3
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const getSuperLikeStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('superLikesLeft superLikesResetAt');
+    const now = new Date();
+    let left = user.superLikesLeft ?? 5;
+    if (!user.superLikesResetAt || now - user.superLikesResetAt > 24 * 60 * 60 * 1000) {
+      left = 5;
+    }
+    const hoursUntilReset = user.superLikesResetAt
+      ? Math.max(0, Math.ceil((24 * 60 * 60 * 1000 - (now - user.superLikesResetAt)) / 3600000))
+      : 24;
+    res.json({ superLikesLeft: left, hoursUntilReset });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// ─── UNDO LAST SWIPE ─────────────────────────────────────────────
+export const undoLastSwipe = async (req, res) => {
+  try {
+    const swiperId = req.user._id;
+    // Find the most recent swipe by this user
+    const lastSwipe = await Swipe.findOne({ swiper: swiperId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!lastSwipe) {
+      return res.status(404).json({ message: 'No swipe to undo' });
+    }
+
+    // Only allow undo within 30 seconds
+    const age = Date.now() - new Date(lastSwipe.createdAt).getTime();
+    if (age > 30000) {
+      return res.status(400).json({ message: 'Undo window expired (30 seconds)' });
+    }
+
+    await Swipe.deleteOne({ _id: lastSwipe._id });
+
+    // If it was a super like, refund it
+    if (lastSwipe.likeType === 'superLike') {
+      await User.findByIdAndUpdate(swiperId, { $inc: { superLikesLeft: 1 } });
+    }
+
+    // Remove any match created by this swipe
+    await Match.deleteOne({ users: { $all: [swiperId, lastSwipe.swiped] } });
+
+    res.json({ success: true, undoneUserId: lastSwipe.swiped, likeType: lastSwipe.likeType });
+  } catch (err) {
+    console.error('Undo swipe error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

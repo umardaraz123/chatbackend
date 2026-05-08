@@ -4,7 +4,8 @@ import {
   getMessages,
   sendMessage,
   markMessagesAsRead,
-  getUnreadCount 
+  getUnreadCount,
+  reactToMessage
 } from '../controllers/message.controller.js';
 
 import { protectRoute } from '../middleware/auth.middleware.js';
@@ -15,4 +16,5 @@ router.get("/:id",protectRoute,getMessages)
 router.post("/send/:id",protectRoute,sendMessage)
 router.put("/read/:id",protectRoute,markMessagesAsRead)
 router.get("/unread/count",protectRoute,getUnreadCount)
+router.put("/react/:id",protectRoute,reactToMessage)
 export default router;

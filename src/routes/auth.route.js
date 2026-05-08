@@ -1,5 +1,5 @@
 import express from 'express';
-import { login, logout, signup,updateProfile,checkAuth,getUserDetails, getUsers,findMatches,getMatchDetails,getUserById, requestPasswordReset, verifyOTP, resetPassword, sendSignupOTP, verifySignupOTP, completeSignup } from '../controllers/auth.controller.js';
+import { login, logout, signup,updateProfile,checkAuth,getUserDetails, getUsers,findMatches,getMatchDetails,getUserById, requestPasswordReset, verifyOTP, resetPassword, sendSignupOTP, verifySignupOTP, completeSignup, blockUser, unblockUser, getBlockedUsers, recordProfileView, getProfileViews, reportUser, updateMood } from '../controllers/auth.controller.js';
 import { protectRoute } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -27,8 +27,17 @@ router.get("/matches/find", protectRoute, findMatches);
 router.get("/matches/details/:userId", protectRoute, getMatchDetails);
 router.get("/user/:userId", protectRoute, getUserById);
 
-// Option 2: Or use query parameters instead
-// router.get("/matches", protectRoute, findMatches);
-// router.get("/match-details", protectRoute, getMatchDetails); // Use ?userId=xxx
+// Block routes
+router.post('/block/:userId', protectRoute, blockUser);
+router.delete('/block/:userId', protectRoute, unblockUser);
+router.get('/blocked', protectRoute, getBlockedUsers);
+
+// Profile views routes
+router.post('/view/:userId', protectRoute, recordProfileView);
+router.get('/profile-views', protectRoute, getProfileViews);
+
+// Report & Mood routes
+router.post('/report/:userId', protectRoute, reportUser);
+router.put('/mood', protectRoute, updateMood);
 
 export default router;

@@ -7,7 +7,12 @@ import {
   getDetailedMatches,
   getLikedUsers, 
   getSwipeStats,
-  getReceivedSwipes
+  getReceivedSwipes,
+  superLikeUser,
+  boostProfile,
+  getBoostStatus,
+  getSuperLikeStatus,
+  undoLastSwipe
 } from '../controllers/swipe.controller.js';
 import { protectRoute } from '../middleware/auth.middleware.js';
 
@@ -20,5 +25,12 @@ router.get('/matches/detailed', protectRoute, getDetailedMatches);
 router.get('/liked', protectRoute, getLikedUsers);
 router.get('/stats', protectRoute, getSwipeStats);
 router.get('/received', protectRoute, getReceivedSwipes);
+
+// New feature routes
+router.post('/super-like/:userId', protectRoute, superLikeUser);
+router.post('/boost', protectRoute, boostProfile);
+router.get('/boost/status', protectRoute, getBoostStatus);
+router.get('/super-like/status', protectRoute, getSuperLikeStatus);
+router.delete('/undo', protectRoute, undoLastSwipe);
 
 export default router;
